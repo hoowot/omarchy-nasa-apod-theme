@@ -59,6 +59,19 @@ BarWidget {
     id: refresher
     command: [root.pluginFile("bin/nasa-apod-theme"),
       "--switch", root.switchTheme ? "always" : "if-active"]
+    onExited: stateFile.reload()
+  }
+
+  // watchChanges alone isn't enough: it can't watch a state file that
+  // doesn't exist yet (the first run creates it), and the script replaces
+  // the file atomically, which gives it a new inode. Re-read it after each
+  // refresh, and every minute for the copies on other monitors, whose own
+  // refresh skips the work when another copy holds the lock.
+  Timer {
+    interval: 60000
+    running: true
+    repeat: true
+    onTriggered: stateFile.reload()
   }
 
   // Once today's picture is handled the script exits without any network
