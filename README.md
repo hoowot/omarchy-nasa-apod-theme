@@ -146,9 +146,10 @@ under 50 KB, so a placeholder can't replace your wallpaper.
   image".** The feed pointed somewhere the plugin doesn't trust, so it
   kept your current wallpaper. If this keeps happening, NASA has probably
   changed where it hosts images and the plugin needs an update.
-- **"missing dependency".** Reinstall whichever are missing. This only
-  installs packages you don't already have:
-  `omarchy pkg add curl jq python imagemagick util-linux`
+- **"missing dependency".** The log names the missing command. Run
+  `omarchy pkg install` and pick the package that provides it: `curl`,
+  `jq`, `python`, `imagemagick` (for `magick`), or `util-linux` (for
+  `flock`). `omarchy` itself comes with Omarchy.
 - **Right-click does nothing.** Either `nasa-apod` is already your current
   theme, or the first picture hasn't been built yet (for example, if you
   installed on a day when APOD is a video). Hover over 🔭: the tooltip shows
