@@ -9,7 +9,8 @@ wallpaper every day and themes your workstation to match it.
   `nasa-apod` Omarchy theme, so your terminal, bar, window borders and other
   themed apps pick up the picture's colors.
 - Shows today's title in the bar. Hover for the date, click to open the
-  picture's page and explanation on science.nasa.gov.
+  picture's page and explanation on science.nasa.gov, right-click to use it
+  as your theme.
 
 ![The plugin's bar widget and tooltip over the Webb "Cosmic Cliffs" picture, with a terminal in the theme generated from it](preview.png)
 
@@ -23,19 +24,39 @@ This is a community project. It is not affiliated with or endorsed by NASA.
 omarchy plugin add https://github.com/hoowot/omarchy-nasa-apod-theme.git --enable
 ```
 
-> **Heads up: this switches your theme right away.** As soon as the widget
-> loads, it downloads today's picture and switches your Omarchy theme to
-> `nasa-apod`: new wallpaper, and new colors for your terminal, bar, window
-> borders and other themed apps. It then switches to it again each day when
-> a new picture arrives. Your previous theme isn't changed or deleted. To
-> go back, pick it in the theme switcher (`omarchy theme switcher`), and
-> turn off [`switchTheme`](#settings) so the plugin doesn't switch you
-> again.
+Installing doesn't change your theme. Within a few seconds of the widget
+loading, 🔭 and today's title appear in the bar, the plugin builds a
+`nasa-apod` theme from today's picture, and you get a one-time notification
+that it's ready.
 
-The first picture shows up within a few seconds of the widget loading. After
-that the widget checks once an hour, but only contacts NASA when the next
-day's picture is due. APOD usually posts just after midnight US Eastern
-time.
+### Start using it
+
+Do any one of these:
+
+- **Right-click 🔭** in the bar.
+- **Click the "NASA APOD theme is ready" notification.**
+- **Pick "Nasa Apod"** in the theme switcher (`omarchy theme switcher`).
+
+That switches your wallpaper, and your terminal, bar, window borders and
+other themed apps, to today's picture. From then on it updates by itself
+every day. To stop, pick any other theme; the plugin won't switch you back.
+Your other themes are never changed.
+
+If you'd rather the plugin switch to it on its own, including right after
+install, turn on [`switchTheme`](#settings).
+
+The widget checks once an hour, but only contacts NASA when the next day's
+picture is due. APOD usually posts just after midnight US Eastern time.
+
+### Updating
+
+```bash
+omarchy plugin update hoowot.nasa-apod-theme
+omarchy restart shell
+```
+
+The bar keeps running the old version of the widget until the shell
+restarts (or you log out and back in).
 
 ### Requirements
 
@@ -49,7 +70,7 @@ in `~/.config/omarchy/shell.json`:
 
 | Setting       | Default | What it does |
 |---------------|---------|--------------|
-| `switchTheme` | `true`  | Switch to the `nasa-apod` theme as soon as the widget loads, including right after install, and again whenever a new picture arrives. When `false`, the theme is still kept up to date, but it's only re-applied if it's already your current theme. Pick it yourself in the theme switcher (it's listed as "Nasa Apod"). |
+| `switchTheme` | `false` | When `false`, the plugin keeps the `nasa-apod` theme up to date but never switches to it on its own; it only re-applies it each day if it's already your current theme. When `true`, it switches to the `nasa-apod` theme as soon as the widget loads, including right after install, and again whenever a new picture arrives, even if you've picked another theme. |
 | `showTitle`   | `true`  | Show today's title next to the 🔭 icon. When `false`, only the icon shows and the title stays in the tooltip. |
 
 ## How it works
@@ -73,11 +94,12 @@ script:
    writes `colors.toml`. The background comes from the most common color, the
    accent from the most saturated color that contrasts with it, and the
    terminal colors from the image's hues where it has them.
-4. Writes the theme to `~/.config/omarchy/themes/nasa-apod/` and runs
-   `omarchy theme set nasa-apod`, which switches your theme. This happens
-   on the very first run, right after install. With `switchTheme` off, it
-   only runs `omarchy theme set` if `nasa-apod` is already your current
-   theme.
+4. Writes the theme to `~/.config/omarchy/themes/nasa-apod/`. If
+   `nasa-apod` is already your current theme, it runs
+   `omarchy theme set nasa-apod` to show the new picture. Otherwise it
+   leaves your theme alone, and the first time sends the one notification
+   described in [Start using it](#start-using-it). With `switchTheme` on, it
+   runs `omarchy theme set nasa-apod` every time, switching your theme.
 5. Records the date, title and link in the state file, which the widget
    watches.
 
@@ -127,6 +149,10 @@ under 50 KB, so a placeholder can't replace your wallpaper.
 - **"missing dependency".** Reinstall whichever are missing. This only
   installs packages you don't already have:
   `omarchy pkg add curl jq python imagemagick util-linux`
+- **Right-click does nothing.** Either `nasa-apod` is already your current
+  theme, or the first picture hasn't been built yet (for example, if you
+  installed on a day when APOD is a video). Hover over 🔭: the tooltip shows
+  "Right-click to use it as your theme" when it's available.
 - **I switched themes and it switched me back.** That's `switchTheme: true`.
   Turn it off to keep the theme you picked.
 

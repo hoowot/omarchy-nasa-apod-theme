@@ -79,9 +79,13 @@ How the plugin is written to behave (see the code to confirm):
 - Writes only to `~/.config/omarchy/themes/nasa-apod/` and
   `~/.local/state/omarchy-nasa-apod/` (or the `XDG_CONFIG_HOME` and
   `XDG_STATE_HOME` equivalents), and switches themes with
-  `omarchy theme set`. By default it switches the user's theme as soon as
-  the widget first loads, without asking. The README says so up front, and
-  the `switchTheme` setting turns this off. When it cleans up old pictures,
+  `omarchy theme set`. By default it never switches the user's theme on
+  its own: it only switches when the user right-clicks the widget, clicks
+  the one-time "theme is ready" notification, or picks the theme
+  themselves, and after that only keeps that theme up to date. The
+  `switchTheme` setting, off by default, makes it switch automatically.
+  The notification and right-click run `omarchy theme set nasa-apod` with
+  fixed arguments; no feed data reaches either command. When it cleans up old pictures,
   it only deletes its own `apod-*` files.
 - Treats the feed as untrusted:
   - It is parsed by Python's standard XML library, which doesn't resolve

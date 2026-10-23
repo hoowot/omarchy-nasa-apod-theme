@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.1 — 2026-10-23
+
+- The plugin no longer switches your theme on its own by default.
+  `switchTheme` now defaults to off: installing builds the `nasa-apod`
+  theme and shows today's title, and you start using it by right-clicking
+  🔭 in the bar, clicking the one-time "theme is ready" notification, or
+  picking it in the theme switcher. Once it's your theme, it still updates
+  daily. Turn `switchTheme` on for the previous behavior.
+- Fixed the bar widget's title not appearing after a fresh install until
+  the shell restarted.
+- After updating, run `omarchy restart shell` so the bar loads the new
+  widget.
+
 ## 1.1.0 — 2026-10-23
 
 - Read the APOD RSS feed on science.nasa.gov instead of the
