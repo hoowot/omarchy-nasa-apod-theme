@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "hoowot.nasa-apod-theme",
+  "name": "NASA APOD Wallpaper & Theme",
+  "version": "1.1.0",
+  "author": "hoowot",
+  "license": "MIT",
+  "description": "Sets NASA's Astronomy Picture of the Day as your wallpaper every day and themes your workstation to match it, with today's title in the bar. Switches your theme as soon as it's enabled.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "NASA APOD Wallpaper & Theme",
+    "description": "Today's NASA Astronomy Picture of the Day. Switches to the nasa-apod theme as soon as it loads, then refreshes it daily; click to open the picture's page.",
+    "category": "Info",
+    "aliases": [
+      "nasa",
+      "apod",
+      "astronomy",
+      "wallpaper",
+      "space"
+    ],
+    "defaultSection": "right",
+    "allowMultiple": false,
+    "defaults": {
+      "switchTheme": true,
+      "showTitle": true
+    },
+    "schema": [
+      {
+        "key": "switchTheme",
+        "type": "boolean",
+        "label": "Switch to the APOD theme daily",
+        "defaultValue": true,
+        "description": "On (default): switch to the nasa-apod theme as soon as the widget loads, including right after install, and again whenever a new picture arrives. Off: keep the nasa-apod theme up to date, but only re-apply it if it is already your current theme."
+      },
+      {
+        "key": "showTitle",
+        "type": "boolean",
+        "label": "Show title in the bar",
+        "defaultValue": true,
+        "description": "Show today's title next to the icon. Off shows the icon only; the title is still in the tooltip."
+      }
+    ]
+  }
+}

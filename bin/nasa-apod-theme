@@ -1,0 +1,268 @@
+#!/bin/bash
+# Downloads NASA's Astronomy Picture of the Day, generates a theme palette
+# from it, and installs it as the "nasa-apod" Omarchy theme.
+#
+#   nasa-apod-theme [--switch always|if-active] [--force]
+#
+#   --switch always     Switch to the nasa-apod theme after refreshing it (default).
+#   --switch if-active  Refresh the theme, but only re-apply it if it is already
+#                       the current theme. Pick it yourself in the theme switcher.
+#   --force             Refresh even if today's picture was already applied.
+#
+# The bar widget runs this once an hour. Once today's picture is handled it
+# exits without contacting NASA until the next day's picture is due.
+#
+# APOD moved to science.nasa.gov in 2026. The old api.nasa.gov/planetary/apod
+# endpoint now mostly returns HTTP 500, and its "successful" responses point at
+# a NASA logo placeholder. So this reads the APOD RSS feed on the new site
+# instead, which needs no API key.
+set -uo pipefail
+
+# NASA_APOD_FEED_URL is for testing against a saved copy of the feed
+# (file:///path/to/feed.xml); normal use never sets it.
+FEED_URL="${NASA_APOD_FEED_URL:-https://science.nasa.gov/feed/apod-basic/}"
+THEME_NAME="nasa-apod"
+THEME_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/themes/$THEME_NAME"
+BG_DIR="$THEME_DIR/backgrounds"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-nasa-apod"
+LOG="$STATE_DIR/nasa-apod.log"
+STATE_FILE="$STATE_DIR/state.json"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+switch_mode="always"
+force=0
+while (($#)); do
+  case "$1" in
+    --switch) switch_mode="${2:-}"; shift 2 || shift ;;
+    --force) force=1; shift ;;
+    -h | --help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+if [[ "$switch_mode" != "always" && "$switch_mode" != "if-active" ]]; then
+  echo "--switch must be 'always' or 'if-active'" >&2
+  exit 2
+fi
+
+mkdir -p "$BG_DIR" "$STATE_DIR"
+
+log() { printf '%s %s\n' "$(date -Is)" "$*" >>"$LOG"; }
+
+# The bar creates one widget per monitor and each one runs this script, so
+# only let one of them do the work.
+exec 9>"$STATE_DIR/.lock"
+flock -n 9 || exit 0
+
+# Remove work directories left behind by a run that was killed.
+find "$STATE_DIR" -maxdepth 1 -type d -name 'work.*' -mmin +60 -exec rm -rf {} +
+
+# Keep the log from growing forever.
+if [[ -f "$LOG" ]] && (($(wc -l <"$LOG") > 1000)); then
+  tail -n 500 "$LOG" >"$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+fi
+
+for cmd in curl python3 magick jq omarchy; do
+  if ! command -v "$cmd" >/dev/null; then
+    log "missing dependency: $cmd"
+    exit 1
+  fi
+done
+
+# APOD posts a new picture once a day, just after midnight US Eastern time.
+# Once today's has been handled, don't contact NASA again until tomorrow.
+if ((!force)) && [[ -f "$STATE_FILE" ]] &&
+  [[ "$(jq -r '.date // empty' "$STATE_FILE" 2>/dev/null)" == "$(TZ=America/New_York date +%F)" ]]; then
+  exit 0
+fi
+
+# Downloads are HTTPS only, including redirects, with time and size limits.
+# The feed is normally about 200 KB; APOD originals are rarely over 50 MB.
+https_only=(--proto '=https' --proto-redir '=https' --max-redirs 5)
+feed_proto=("${https_only[@]}")
+[[ -n "${NASA_APOD_FEED_URL:-}" ]] && feed_proto=(--proto '=https,file' --proto-redir '=https' --max-redirs 5)
+
+feed=$(curl "${feed_proto[@]}" -fsSL --max-time 60 --max-filesize 10000000 "$FEED_URL") || {
+  log "fetch failed"
+  exit 1
+}
+
+# The newest feed item is today's APOD. Prints date, title, page link,
+# media type, original-size image URL and resized image URL, one per line.
+# hdurl points at a resizing proxy (dynamicimage/assets/...?w=..&h=..); the
+# same path under content/dam/ with no query string is the original upload.
+#
+# Days whose main media is an embedded player (a YouTube or Vimeo <iframe>)
+# carry a screenshot of that player in hdurl, play button and logos
+# included, so those count as "embed" and are skipped. Native <video> days
+# carry a clean still frame and are used like any other picture.
+#
+# Everything in the feed is untrusted: the image URL must be HTTPS on NASA's
+# asset host, the link must be an HTTPS science.nasa.gov page (otherwise it's
+# dropped), and the title loses control characters (which could otherwise
+# inject terminal escape sequences into the log) and is capped in length.
+# Python's XML parser doesn't resolve external entities, and the bundled
+# expat limits entity expansion.
+if ! parsed=$(python3 -I -c '
+import sys, xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
+from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
+NS = "{https://science.nasa.gov/apod/}"
+CONTENT = "{http://purl.org/rss/1.0/modules/content/}encoded"
+
+def on_host(url, host):
+    # Values go back to bash one per line, so a URL must be a single clean line.
+    if any(c.isspace() or not c.isprintable() for c in url):
+        return False
+    parts = urlsplit(url)
+    return parts.scheme == "https" and parts.hostname == host and not parts.username
+
+item = ET.fromstring(sys.stdin.read()).find("channel/item")
+hd = (item.findtext(NS + "hdurl") or "").strip()
+if not on_host(hd, "assets.science.nasa.gov"):
+    sys.exit("image URL is not on assets.science.nasa.gov: " + repr(hd[:200]))
+orig = hd.split("?")[0].replace("/dynamicimage/assets/", "/content/dam/", 1)
+link = (item.findtext("link") or "").strip()
+if not on_host(link, "science.nasa.gov"):
+    link = ""
+title = " ".join("".join(c for c in item.findtext("title") if c.isprintable() or c.isspace()).split())[:200]
+date = parsedate_to_datetime(item.findtext("pubDate")).astimezone(ZoneInfo("America/New_York")).date()
+media = "embed" if "<iframe" in (item.findtext(CONTENT) or "").lower() else "image"
+for value in (date.isoformat(), title, link, media, orig, hd):
+    print(value)
+' <<<"$feed" 2>>"$LOG"); then
+  log "could not parse APOD feed"
+  exit 1
+fi
+
+{ read -r apod_date; read -r title; read -r link; read -r media; read -r img_url; read -r fallback_url; } <<<"$parsed"
+
+# Record embed days too, so the bar still shows today's title and the hourly
+# check doesn't log the skip every hour.
+write_state() {
+  jq -n --arg date "$apod_date" --arg title "$title" --arg link "$link" --arg media "$media" \
+    '{date: $date, title: $title, link: $link, media: $media}' >"$STATE_FILE.tmp" &&
+    mv "$STATE_FILE.tmp" "$STATE_FILE"
+}
+
+already_done() {
+  ((!force)) && [[ -f "$STATE_FILE" ]] &&
+    [[ "$(jq -r '.date // empty' "$STATE_FILE" 2>/dev/null)" == "$apod_date" ]]
+}
+
+if [[ "$media" == "embed" ]]; then
+  if ! already_done; then
+    log "today's APOD ($apod_date: $title) is an embedded video — keeping current wallpaper"
+    write_state
+  fi
+  exit 0
+fi
+
+if [[ -z "$img_url" ]]; then
+  log "no image url in today's feed item"
+  exit 1
+fi
+
+# `omarchy theme current` prints a display name such as "Nasa Apod".
+theme_is_active() {
+  local current
+  current=$(omarchy theme current 2>/dev/null | tr '[:upper:] ' '[:lower:]-')
+  [[ "$current" == "$THEME_NAME" ]]
+}
+
+apply_theme() {
+  if [[ "$switch_mode" == "if-active" ]] && ! theme_is_active; then
+    log "theme refreshed; not switching to it (--switch if-active)"
+    return 0
+  fi
+  if ! omarchy theme set "$THEME_NAME" >>"$LOG" 2>&1; then
+    log "theme set failed"
+    return 1
+  fi
+  log "applied theme $THEME_NAME"
+}
+
+# Nothing new since the last run.
+if already_done && compgen -G "$BG_DIR/apod-$apod_date.*" >/dev/null; then
+  exit 0
+fi
+
+# Omarchy's background renderer loads the wallpaper with a Qt Image cache
+# keyed on the file path only, not content or mtime, so reusing a fixed
+# filename every day would keep showing the first day's picture. A
+# date-stamped filename forces a real cache miss each day.
+bg_file="$BG_DIR/apod-$apod_date.jpg"
+
+# Work in the state directory, so the final moves are atomic renames on the
+# same filesystem.
+work="$(mktemp -d "$STATE_DIR/work.XXXXXX")"
+trap 'rm -rf "$work"' EXIT
+download="$work/download"
+picture="$work/picture.jpg"
+
+if ! curl "${https_only[@]}" -fsSL --max-time 300 --max-filesize 100000000 "$img_url" -o "$download"; then
+  log "original image download failed, trying resized: $img_url"
+  rm -f "$download"
+  if [[ -z "$fallback_url" ]] ||
+    ! curl "${https_only[@]}" -fsSL --max-time 300 --max-filesize 100000000 "$fallback_url" -o "$download"; then
+    log "image download failed: ${fallback_url:-$img_url}"
+    exit 1
+  fi
+fi
+
+# A real APOD is hundreds of KB or more. Anything this small is a
+# placeholder (the old API served a 9 KB NASA logo for weeks), so keep the
+# current theme rather than apply it.
+size=$(stat -c %s "$download")
+if ((size < 50000)); then
+  log "downloaded image is suspiciously small ($size bytes) — keeping current theme"
+  exit 1
+fi
+
+# Never let ImageMagick guess the format of a downloaded file: some of its
+# formats (SVG, MVG, MSL, PostScript and others) can read or write local
+# files or run external programs. Identify the file by its leading bytes,
+# accept only JPEG, PNG or WebP, and name that format explicitly when
+# reading it.
+format=$(python3 -I -c '
+import sys
+with open(sys.argv[1], "rb") as f:
+    head = f.read(12)
+if head.startswith(b"\xff\xd8\xff"):
+    print("jpeg")
+elif head.startswith(b"\x89PNG\r\n\x1a\n"):
+    print("png")
+elif head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+    print("webp")
+' "$download")
+if [[ -z "$format" ]]; then
+  log "downloaded file is not a JPEG, PNG or WebP image — keeping current theme"
+  exit 1
+fi
+
+# Re-encode to a fresh JPEG, so the wallpaper renderer and the palette step
+# only ever read a file ImageMagick wrote itself. This also drops metadata
+# and scales down anything larger than 8K. The limits stop a crafted image
+# from using unbounded memory, disk or time.
+magick_limits=(-limit width 32KP -limit height 32KP -limit area 256MP
+  -limit memory 1GiB -limit map 2GiB -limit disk 4GiB -limit time 120)
+if ! magick "${magick_limits[@]}" "$format:$download" -auto-orient -strip \
+  -resize '7680x7680>' -quality 92 "jpeg:$picture" >>"$LOG" 2>&1; then
+  log "could not process the downloaded image — keeping current theme"
+  exit 1
+fi
+
+if ! python3 -I "$SCRIPT_DIR/apod-palette.py" "$picture" "$work/colors.toml" >>"$LOG" 2>&1; then
+  log "palette generation failed"
+  exit 1
+fi
+
+chmod 644 "$picture" "$work/colors.toml"
+mv "$picture" "$bg_file"
+mv "$work/colors.toml" "$THEME_DIR/colors.toml"
+# Only remove the plugin's own older pictures.
+find "$BG_DIR" -maxdepth 1 -type f -name 'apod-*' ! -name "$(basename "$bg_file")" -delete
+log "downloaded APOD $apod_date: $title"
+
+apply_theme || exit 1
+write_state
